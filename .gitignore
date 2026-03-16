@@ -1,0 +1,21 @@
+node_modules
+.env
+.env.local
+.env.*.local
+.next
+dist
+.turbo
+*.log
+*.tsbuildinfo
+.DS_Store
+prisma/migrations/
+generated/
+package-lock.json
+yarn.lock                                           
+# Next.js static export (Capacitor web source)
+apps/web/out/
+
+# Capacitor native projects — generated, not source-controlled by default.
+# Remove these lines if you want to commit the native projects.
+apps/web/android/
+apps/web/ios/

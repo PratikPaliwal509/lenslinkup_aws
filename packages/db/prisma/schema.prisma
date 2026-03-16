@@ -1,0 +1,515 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum ConnectionStatus {
+  PENDING   // sender is waiting for receiver to accept
+  ACCEPTED  // mutual connection established
+  REJECTED  // receiver rejected
+}
+
+enum PostStatus {
+  OPEN      // accepting bids
+  CLOSED    // poster accepted a bid
+  CANCELLED // poster cancelled
+}
+
+enum BidStatus {
+  PENDING   // waiting for poster response
+  ACCEPTED  // poster accepted this bid
+  REJECTED  // poster rejected this bid
+}
+
+enum SubscriptionPlan {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  PENDING   // order created, payment not yet verified
+  ACTIVE    // payment verified, premium active
+  EXPIRED   // past expiresAt
+  CANCELLED // user or admin cancelled
+}
+
+enum ServiceType {
+  SERVICE   // offered service (e.g. "Wedding Photography Package")
+  PRODUCT   // physical / digital product (e.g. "16x20 Canvas Print")
+}
+
+// ─── CRM Enums ────────────────────────────────────────────────────────────────
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  NEGOTIATING
+  WON
+  LOST
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CHEQUE
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentDirection {
+  RECEIVED
+  SENT
+}
+
+enum TodoPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TodoStatus {
+  PENDING
+  DONE
+}
+
+// ─── Auth Models ──────────────────────────────────────────────────────────────
+
+model User {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  passwordHash        String
+  role                Role      @default(USER)
+  isEmailVerified     Boolean   @default(false)
+  emailVerifyToken    String?
+  passwordResetToken  String?
+  passwordResetExpiry DateTime?
+  lastActiveAt        DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  profile  Profile?
+  sessions Session[]
+
+  sentConnections     Connection[] @relation("ConnectionSender")
+  receivedConnections Connection[] @relation("ConnectionReceiver")
+
+  workPosts     WorkPost[]
+  bids          Bid[]
+  notifications Notification[]
+  subscriptions Subscription[]
+  reviewsGiven     Review[]         @relation("ReviewsGiven")
+  reviewsReceived  Review[]         @relation("ReviewsReceived")
+  serviceProducts  ServiceProduct[]
+
+  // CRM relations
+  contacts       Contact[] @relation("ContactOwner")
+  contactsLinked Contact[] @relation("ContactLinkedUser")
+  leads          Lead[]
+  crmOrders      Order[]
+  payments       Payment[]
+  todos          Todo[]
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// ─── Profile Models ───────────────────────────────────────────────────────────
+
+model Profile {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  displayName String
+  title       String? @db.VarChar(100)
+  bio         String?
+  phone       String?
+  website     String?
+  instagram   String?
+  youtube     String?
+  address     String?
+  area        String?
+  city        String?
+  state       String?
+  pincode     String?
+  avatarUrl   String?
+  bannerUrl   String?
+  isVerified   Boolean  @default(false)
+  isPremium    Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  isPublic     Boolean  @default(true)
+  avgRating    Float    @default(0)
+  reviewCount  Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categories ProfileCategory[]
+
+  @@map("profiles")
+}
+
+model Category {
+  id    String @id @default(cuid())
+  name  String @unique
+  slug  String @unique
+  emoji String @default("📸")
+  order Int    @default(0)
+
+  profiles ProfileCategory[]
+
+  @@map("categories")
+}
+
+model ProfileCategory {
+  profileId  String
+  categoryId String
+
+  profile  Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, categoryId])
+  @@map("profile_categories")
+}
+
+// ─── Connection Model ─────────────────────────────────────────────────────────
+
+model Connection {
+  id         String           @id @default(cuid())
+  senderId   String
+  receiverId String
+  status     ConnectionStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  sender   User @relation("ConnectionSender",   fields: [senderId],   references: [id], onDelete: Cascade)
+  receiver User @relation("ConnectionReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  // One connection record per pair (enforced in app logic — sender always the requester)
+  @@unique([senderId, receiverId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([status])
+  @@map("connections")
+}
+
+// ─── Work Posts & Bids ────────────────────────────────────────────────────────
+
+model WorkPost {
+  id           String     @id @default(cuid())
+  userId       String
+  title        String     @db.VarChar(120)
+  description  String
+  categorySlug String?                          // target category of work
+  city         String?
+  budget       Int?                             // budget in INR (nullable = negotiable)
+  eventDate    DateTime?
+  status       PostStatus @default(OPEN)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bids Bid[]
+  reviews Review[]
+  leads Lead[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([categorySlug])
+  @@index([city])
+  @@map("work_posts")
+}
+
+model Bid {
+  id         String    @id @default(cuid())
+  postId     String
+  bidderId   String
+  amount     Int                              // quoted price in INR
+  message    String
+  status     BidStatus @default(PENDING)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  post   WorkPost @relation(fields: [postId],   references: [id], onDelete: Cascade)
+  bidder User     @relation(fields: [bidderId], references: [id], onDelete: Cascade)
+
+  // One bid per bidder per post
+  @@unique([postId, bidderId])
+  @@index([postId])
+  @@index([bidderId])
+  @@map("bids")
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+enum NotificationType {
+  CONNECTION_REQUEST  // someone sent you a request
+  CONNECTION_ACCEPTED // your request was accepted
+  BID_RECEIVED        // someone bid on your post
+  BID_ACCEPTED        // your bid was accepted
+  BID_REJECTED        // your bid was not selected
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  userId     String                               // recipient
+  type       NotificationType
+  title      String
+  message    String
+  relatedId  String?                              // postId, connectionId, bidId…
+  isRead     Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// ─── Reviews ──────────────────────────────────────────────────────────────────
+
+model Review {
+  id         String   @id @default(cuid())
+  reviewerId String
+  revieweeId String
+  workPostId String?                           // optional: tied to a specific job
+  rating     Int                               // 1–5
+  comment    String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  reviewer User      @relation("ReviewsGiven",    fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewee User      @relation("ReviewsReceived", fields: [revieweeId], references: [id], onDelete: Cascade)
+  workPost WorkPost? @relation(fields: [workPostId], references: [id], onDelete: SetNull)
+
+  // One review per reviewer-reviewee pair (can update, not duplicate)
+  @@unique([reviewerId, revieweeId])
+  @@index([revieweeId])
+  @@index([reviewerId])
+  @@map("reviews")
+}
+
+// ─── Services & Products ──────────────────────────────────────────────────────
+
+model ServiceProduct {
+  id          String      @id @default(cuid())
+  userId      String
+  type        ServiceType @default(SERVICE)
+  name        String      @db.VarChar(100)
+  description String?     @db.VarChar(500)
+  price       Int?                          // in INR; null = "on request"
+  unit        String?     @db.VarChar(40)  // e.g. "per day", "per photo", "each"
+  imageUrl    String?
+  order       Int         @default(0)       // manual display order
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, order])
+  @@map("service_products")
+}
+
+// ─── Subscriptions ────────────────────────────────────────────────────────────
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  userId             String
+  plan               SubscriptionPlan
+  status             SubscriptionStatus @default(PENDING)
+  amount             Int                              // in paise (INR × 100)
+  razorpayOrderId    String             @unique
+  razorpayPaymentId  String?
+  razorpaySignature  String?
+  startsAt           DateTime?
+  expiresAt          DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+// ─── Admin / Platform Settings ────────────────────────────────────────────────
+
+model AppSettings {
+  key       String   @id                // e.g. "free_post_limit", "premium_post_limit"
+  value     String                      // stored as string; parse to int/bool as needed
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+// ─── CRM Models ───────────────────────────────────────────────────────────────
+
+model Contact {
+  id           String   @id @default(cuid())
+  userId       String
+  linkedUserId String?                          // optional: links to a LensLinkUp profile
+  name         String   @db.VarChar(100)
+  phone        String?  @db.VarChar(20)
+  email        String?  @db.VarChar(255)
+  company      String?  @db.VarChar(100)
+  notes        String?  @db.VarChar(500)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User     @relation("ContactOwner",      fields: [userId],       references: [id], onDelete: Cascade)
+  linkedUser User?    @relation("ContactLinkedUser", fields: [linkedUserId], references: [id], onDelete: SetNull)
+
+  leads    Lead[]
+  orders   Order[]
+  payments Payment[]
+  todos    Todo[]
+
+  @@index([userId])
+  @@index([linkedUserId])
+  @@map("contacts")
+}
+
+model Lead {
+  id                String     @id @default(cuid())
+  userId            String
+  contactId         String?
+  linkedPostId      String?
+  linkedBidId       String?                          // reference only (no FK — bids can be deleted)
+  title             String     @db.VarChar(150)
+  description       String?    @db.VarChar(1000)
+  status            LeadStatus @default(NEW)
+  value             Int?                             // estimated value in INR
+  expectedCloseDate DateTime?
+  notes             String?    @db.VarChar(500)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  user     User      @relation(fields: [userId],       references: [id], onDelete: Cascade)
+  contact  Contact?  @relation(fields: [contactId],    references: [id], onDelete: SetNull)
+  workPost WorkPost? @relation(fields: [linkedPostId], references: [id], onDelete: SetNull)
+
+  orders Order[]
+  todos  Todo[]
+
+  @@index([userId])
+  @@index([userId, status])
+  @@map("leads")
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  userId       String
+  contactId    String?
+  leadId       String?
+  title        String      @db.VarChar(150)
+  description  String?     @db.VarChar(1000)
+  amount       Int                               // in INR (rupees)
+  status       OrderStatus @default(DRAFT)
+  orderDate    DateTime    @default(now())
+  deliveryDate DateTime?
+  notes        String?     @db.VarChar(500)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user    User     @relation(fields: [userId],    references: [id], onDelete: Cascade)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  lead    Lead?    @relation(fields: [leadId],    references: [id], onDelete: SetNull)
+
+  payments Payment[]
+  todos    Todo[]
+
+  @@index([userId])
+  @@index([userId, status])
+  @@map("orders")
+}
+
+model Payment {
+  id          String           @id @default(cuid())
+  userId      String
+  orderId     String?
+  contactId   String?
+  amount      Int                               // in INR (rupees)
+  method      PaymentMethod    @default(CASH)
+  status      PaymentStatus    @default(PENDING)
+  direction   PaymentDirection @default(RECEIVED)
+  description String?          @db.VarChar(200)
+  reference   String?          @db.VarChar(100) // UPI txn ID, cheque number, etc.
+  dueDate     DateTime?
+  paidAt      DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  user    User     @relation(fields: [userId],    references: [id], onDelete: Cascade)
+  order   Order?   @relation(fields: [orderId],   references: [id], onDelete: SetNull)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, direction])
+  @@map("payments")
+}
+
+model Todo {
+  id              String       @id @default(cuid())
+  userId          String
+  linkedContactId String?
+  linkedLeadId    String?
+  linkedOrderId   String?
+  title           String       @db.VarChar(200)
+  description     String?      @db.VarChar(500)
+  status          TodoStatus   @default(PENDING)
+  priority        TodoPriority @default(MEDIUM)
+  dueDate         DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  user    User     @relation(fields: [userId],          references: [id], onDelete: Cascade)
+  contact Contact? @relation(fields: [linkedContactId], references: [id], onDelete: SetNull)
+  lead    Lead?    @relation(fields: [linkedLeadId],    references: [id], onDelete: SetNull)
+  order   Order?   @relation(fields: [linkedOrderId],   references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, dueDate])
+  @@map("todos")
+}

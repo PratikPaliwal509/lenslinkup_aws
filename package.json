@@ -1,0 +1,33 @@
+{
+  "name": "lenslinkup",
+  "version": "0.0.1",
+  "private": true,
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check",
+    "db:generate": "npm run db:generate --workspace=packages/db",
+    "db:migrate": "npm run db:migrate --workspace=packages/db",
+    "db:push": "npm run db:push --workspace=packages/db",
+    "db:seed": "npm run db:seed --workspace=packages/db"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "ioredis": "^5.10.0"
+  }
+
+}
