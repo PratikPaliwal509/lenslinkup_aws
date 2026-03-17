@@ -21,7 +21,7 @@ export async function buildApp() {
   // ── Core plugins ──────────────────────────────────────────────────────────
   await fastify.register(helmet, { contentSecurityPolicy: false })
   await fastify.register(cors, {
-    origin: process.env.FRONTEND_URL ?? 'http://35.154.114.186:3000',
+    origin: process.env.FRONTEND_URL ?? 'http://35.154.114.186',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
